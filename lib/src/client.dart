@@ -8,7 +8,7 @@ import 'result.dart';
 
 const _defaultBaseUrl = 'https://api.apialerts.com/event';
 const _defaultIntegration = 'dart';
-const _defaultVersion = '2.0.0';
+const _defaultVersion = '1.0.0';
 
 /// An instance-based API Alerts client.
 ///
