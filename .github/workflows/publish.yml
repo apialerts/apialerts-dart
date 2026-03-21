@@ -1,0 +1,25 @@
+name: Publish to pub.dev
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write  # Required for pub.dev OIDC publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Install dependencies
+        run: dart pub get
+      - name: Test
+        run: dart test
+      - name: Publish
+        run: dart pub publish --force
+      - name: Notify
+        run: dart sample/run.dart --publish
+        env:
+          APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
