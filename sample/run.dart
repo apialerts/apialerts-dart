@@ -23,7 +23,7 @@ Future<void> main(List<String> args) async {
 
   // Minimal send — message only
   final minimalResult = await ApiAlerts.sendAsync(
-    const Event(message: 'Dart SDK - minimal'),
+    const Event(message: 'Dart SDK - minimal', channel: 'testing'),
   );
   if (!minimalResult.success) {
     stderr.writeln('Error (minimal): ${minimalResult.error}');
@@ -34,7 +34,7 @@ Future<void> main(List<String> args) async {
   final fullResult = await ApiAlerts.sendAsync(
     const Event(
       message: 'Dart SDK - full',
-      channel: 'developer',
+      channel: 'testing',
       event: 'sdk.test',
       title: 'Integration Test',
       tags: ['CI/CD', 'Dart'],
