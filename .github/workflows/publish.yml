@@ -5,11 +5,9 @@ on:
     types: [created]
 
 jobs:
-  publish:
+  build:
+    name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      id-token: write  # Required for pub.dev OIDC publishing
     steps:
       - uses: actions/checkout@v6
       - uses: dart-lang/setup-dart@v1
@@ -17,9 +15,44 @@ jobs:
         run: dart pub get
       - name: Test
         run: dart test
+      - run: dart example/run.dart --release
+        env:
+          APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
+
+  publish-alpha:
+    name: Publish Alpha
+    needs: build
+    if: github.event.release.prerelease == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dart-lang/setup-dart@v1
+      - name: Install dependencies
+        run: dart pub get
       - name: Publish
         run: dart pub publish --force
-      - name: Notify
-        run: dart sample/run.dart --publish
+      - run: dart example/run.dart --publish
+        env:
+          APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
+
+  publish-release:
+    name: Publish Release
+    needs: build
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dart-lang/setup-dart@v1
+      - name: Install dependencies
+        run: dart pub get
+      - name: Publish
+        run: dart pub publish --force
+      - run: dart example/run.dart --publish
         env:
           APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}

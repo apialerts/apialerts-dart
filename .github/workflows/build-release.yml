@@ -17,6 +17,6 @@ jobs:
       - name: Test
         run: dart test
       - name: Notify
-        run: dart sample/run.dart --release
+        run: dart example/run.dart --release
         env:
           APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
