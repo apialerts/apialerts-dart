@@ -1,21 +1,10 @@
-import 'dart:io';
-
-import 'package:http/http.dart' as http;
-
 import 'client.dart';
+import 'console.dart';
 import 'event.dart';
 import 'result.dart';
 
-/// Global singleton facade for the API Alerts client.
-///
-/// Call [configure] once at startup, then use [send] or [sendAsync] anywhere.
-///
-/// ```dart
-/// void main() async {
-///   ApiAlerts.configure('your-api-key');
-///   await ApiAlerts.send(Event(message: 'Deploy complete'));
-/// }
-/// ```
+/// Global singleton facade. Call [configure] once, then [send] or [sendAsync]
+/// anywhere.
 class ApiAlerts {
   ApiAlerts._();
 
@@ -25,9 +14,8 @@ class ApiAlerts {
   static void configure(
     String apiKey, {
     bool debug = false,
-    http.Client? httpClient,
   }) {
-    _instance ??= ApiAlertsClient(apiKey, debug: debug, httpClient: httpClient);
+    _instance ??= ApiAlertsClient(apiKey, debug: debug);
   }
 
   /// Override the integration name, version, and base URL on the global client.
@@ -37,24 +25,24 @@ class ApiAlerts {
     _instance?.setOverrides(integration, version, baseUrl);
   }
 
-  /// Send an event — fire-and-forget. Never throws.
+  /// Sends an event, fire-and-forget. Never throws.
   ///
   /// Silently does nothing if the global client has not been initialised.
-  static Future<void> send(Event event) async {
-    await _instance?.send(event);
+  static void send(Event event, {String? apiKey}) {
+    // ignore: unawaited_futures
+    _instance?.send(event, apiKey: apiKey);
   }
 
-  /// Send an event and return the result. Never throws.
+  /// Sends an event and returns the result. Never throws.
   ///
-  /// Returns [SendResult] with [SendResult.success] `false` and an [SendResult.error]
-  /// message if the client has not been initialised or delivery fails.
-  /// Check [SendResult.success] to determine whether the event was delivered.
-  static Future<SendResult> sendAsync(Event event) async {
+  /// Check [SendResult.success]. Returns a failure result if [configure] was
+  /// never called.
+  static Future<SendResult> sendAsync(Event event, {String? apiKey}) async {
     if (_instance == null) {
-      stderr.writeln('x (apialerts.com) Error: client not configured');
+      consoleError('x (apialerts.com) Error: client not configured');
       return const SendResult(success: false, error: 'client not configured');
     }
-    return _instance!.sendAsync(event);
+    return _instance!.sendAsync(event, apiKey: apiKey);
   }
 
   // ignore: invalid_use_of_visible_for_testing_member

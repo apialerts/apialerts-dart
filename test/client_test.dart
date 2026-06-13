@@ -1,53 +1,91 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:apialerts/apialerts.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:test/test.dart';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-http.Response successResponse({
-  String workspace = 'My Workspace',
-  String channel = 'general',
-  List<String> warnings = const [],
-}) =>
-    http.Response(
-      jsonEncode({'workspace': workspace, 'channel': channel, 'warnings': warnings}),
-      200,
-      headers: {'content-type': 'application/json'},
-    );
-
-ApiAlertsClient clientWith(http.Client mock, {String apiKey = 'test-key'}) =>
-    ApiAlertsClient(apiKey, httpClient: mock);
-
-// ── Validation ────────────────────────────────────────────────────────────────
-
 void main() {
+  late HttpServer server;
+  late int port;
+
+  // Per-test response configuration
+  int responseStatus = 200;
+  Map<String, dynamic> responseBody = {};
+  String? rawBody;
+
+  // Per-test request capture
+  Request? lastRequest;
+  String lastRequestBody = '';
+  int requestCount = 0;
+
+  setUpAll(() async {
+    server = await shelf_io.serve(
+      (request) async {
+        lastRequest = request;
+        lastRequestBody = await request.readAsString();
+        requestCount++;
+        return Response(
+          responseStatus,
+          body: rawBody ?? jsonEncode(responseBody),
+          headers: {'content-type': 'application/json'},
+        );
+      },
+      'localhost',
+      0,
+    );
+    port = server.port;
+  });
+
+  tearDownAll(() async => server.close(force: true));
+
+  setUp(() {
+    responseStatus = 200;
+    responseBody = {
+      'workspace': 'My Workspace',
+      'channel': 'general',
+      'warnings': <String>[],
+    };
+    rawBody = null;
+    lastRequest = null;
+    lastRequestBody = '';
+    requestCount = 0;
+  });
+
+  ApiAlertsClient makeClient({String apiKey = 'test-key'}) =>
+      ApiAlertsClient(apiKey)
+        ..setOverrides('dart', '1.0.0', 'http://localhost:$port/event');
+
+  // Validation
+
   group('validation', () {
     test('returns error result when message is empty', () async {
-      final client = clientWith(MockClient((_) async => successResponse()));
-      final result = await client.sendAsync(const Event(message: ''));
+      final result = await makeClient().sendAsync(const Event(message: ''));
       expect(result.success, isFalse);
       expect(result.error, 'message is required');
+      expect(requestCount, 0);
     });
 
     test('returns error result when api key is empty', () async {
-      final client = clientWith(MockClient((_) async => successResponse()), apiKey: '');
-      final result = await client.sendAsync(const Event(message: 'test'));
+      final result =
+          await makeClient(apiKey: '').sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
       expect(result.error, 'api key is missing');
+      expect(requestCount, 0);
     });
   });
 
-  // ── HTTP status codes ───────────────────────────────────────────────────────
+  // HTTP status codes
 
   group('HTTP status codes', () {
     test('200 returns successful SendResult', () async {
-      final client = clientWith(
-        MockClient((_) async => successResponse(workspace: 'W', channel: 'C')),
-      );
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseBody = {
+        'workspace': 'W',
+        'channel': 'C',
+        'warnings': <String>[],
+      };
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isTrue);
       expect(result.workspace, 'W');
       expect(result.channel, 'C');
@@ -55,126 +93,104 @@ void main() {
     });
 
     test('200 with warnings populates warnings list', () async {
-      final client = clientWith(
-        MockClient((_) async =>
-            successResponse(warnings: ['This channel will be deprecated soon'])),
-      );
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseBody = {
+        'workspace': 'W',
+        'channel': 'C',
+        'warnings': ['This channel will be deprecated soon'],
+      };
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isTrue);
       expect(result.warnings, hasLength(1));
       expect(result.warnings.first, 'This channel will be deprecated soon');
     });
 
     test('400 returns error result with bad request message', () async {
-      final client = clientWith(MockClient((_) async => http.Response('', 400)));
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseStatus = 400;
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
       expect(result.error, 'bad request');
     });
 
     test('401 returns error result with unauthorized message', () async {
-      final client = clientWith(MockClient((_) async => http.Response('', 401)));
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseStatus = 401;
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
-      expect(result.error, 'unauthorized — check your api key');
+      expect(result.error, 'unauthorized, check your api key');
     });
 
     test('403 returns error result with forbidden message', () async {
-      final client = clientWith(MockClient((_) async => http.Response('', 403)));
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseStatus = 403;
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
       expect(result.error, 'forbidden');
     });
 
     test('429 returns error result with rate limit message', () async {
-      final client = clientWith(MockClient((_) async => http.Response('', 429)));
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseStatus = 429;
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
       expect(result.error, 'rate limit exceeded');
     });
 
     test('500 returns error result with unexpected status message', () async {
-      final client = clientWith(MockClient((_) async => http.Response('', 500)));
-      final result = await client.sendAsync(const Event(message: 'test'));
+      responseStatus = 500;
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
       expect(result.error, 'unexpected status: 500');
     });
 
     test('invalid JSON response returns error result', () async {
-      final client = clientWith(MockClient((_) async => http.Response('not json', 200)));
-      final result = await client.sendAsync(const Event(message: 'test'));
+      rawBody = 'not json';
+      final result = await makeClient().sendAsync(const Event(message: 'test'));
       expect(result.success, isFalse);
       expect(result.error, 'invalid response from server');
     });
   });
 
-  // ── Request headers ─────────────────────────────────────────────────────────
+  // Request headers
 
   group('request headers', () {
     test('sends Authorization header', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      await client.sendAsync(const Event(message: 'test'));
-      expect(captured.headers['Authorization'], 'Bearer test-key');
+      await makeClient().sendAsync(const Event(message: 'test'));
+      expect(lastRequest!.headers['authorization'], 'Bearer test-key');
     });
 
     test('sends Content-Type header', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      await client.sendAsync(const Event(message: 'test'));
-      expect(captured.headers['Content-Type'], contains('application/json'));
+      await makeClient().sendAsync(const Event(message: 'test'));
+      expect(
+          lastRequest!.headers['content-type'], contains('application/json'));
     });
 
     test('sends X-Integration and X-Version headers', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      await client.sendAsync(const Event(message: 'test'));
-      expect(captured.headers['X-Integration'], 'dart');
-      expect(captured.headers['X-Version'], '2.0.0');
+      await makeClient().sendAsync(const Event(message: 'test'));
+      expect(lastRequest!.headers['x-integration'], 'dart');
+      expect(
+        lastRequest!.headers['x-version'],
+        matches(RegExp(r'^\d+\.\d+\.\d+')),
+      );
     });
 
     test('setOverrides changes integration headers', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      client.setOverrides('github-actions', '1.0.0', 'http://localhost');
+      final client = ApiAlertsClient('test-key')
+        ..setOverrides(
+            'github-actions', '2.0.0', 'http://localhost:$port/event');
       await client.sendAsync(const Event(message: 'test'));
-      expect(captured.headers['X-Integration'], 'github-actions');
-      expect(captured.headers['X-Version'], '1.0.0');
+      expect(lastRequest!.headers['x-integration'], 'github-actions');
+      expect(lastRequest!.headers['x-version'], '2.0.0');
     });
 
-    test('sendWithKey uses the provided key', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      await client.sendWithKey('override-key', const Event(message: 'test'));
-      expect(captured.headers['Authorization'], 'Bearer override-key');
+    test('sendAsync with apiKey uses the provided key', () async {
+      await makeClient()
+          .sendAsync(const Event(message: 'test'), apiKey: 'override-key');
+      expect(lastRequest!.headers['authorization'], 'Bearer override-key');
     });
   });
 
-  // ── Payload serialization ────────────────────────────────────────────────────
+  // Payload serialization
 
   group('payload', () {
     test('sends full event payload', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      await client.sendAsync(const Event(
+      await makeClient().sendAsync(const Event(
         message: 'Full payload',
         channel: 'developer',
         event: 'ci.deploy',
@@ -183,7 +199,7 @@ void main() {
         link: 'https://github.com',
         data: {'version': '2.0.0'},
       ));
-      final body = jsonDecode(captured.body) as Map<String, dynamic>;
+      final body = jsonDecode(lastRequestBody) as Map<String, dynamic>;
       expect(body['message'], 'Full payload');
       expect(body['channel'], 'developer');
       expect(body['event'], 'ci.deploy');
@@ -194,13 +210,8 @@ void main() {
     });
 
     test('null fields are omitted from payload', () async {
-      late http.Request captured;
-      final client = clientWith(MockClient((req) async {
-        captured = req;
-        return successResponse();
-      }));
-      await client.sendAsync(const Event(message: 'minimal'));
-      final body = jsonDecode(captured.body) as Map<String, dynamic>;
+      await makeClient().sendAsync(const Event(message: 'minimal'));
+      final body = jsonDecode(lastRequestBody) as Map<String, dynamic>;
       expect(body.containsKey('channel'), isFalse);
       expect(body.containsKey('event'), isFalse);
       expect(body.containsKey('title'), isFalse);
@@ -210,19 +221,19 @@ void main() {
     });
   });
 
-  // ── Fire-and-forget ──────────────────────────────────────────────────────────
+  // Fire-and-forget
 
   group('send (fire-and-forget)', () {
-    test('does not throw on error', () async {
-      final client = clientWith(MockClient((_) async => http.Response('', 401)));
-      await expectLater(
-        client.send(const Event(message: 'test')),
-        completes,
+    test('does not throw on error', () {
+      responseStatus = 401;
+      expect(
+        () => makeClient().send(const Event(message: 'test')),
+        returnsNormally,
       );
     });
   });
 
-  // ── Global singleton ─────────────────────────────────────────────────────────
+  // Global singleton
 
   group('ApiAlerts singleton', () {
     setUp(() => ApiAlerts.reset());
@@ -235,29 +246,25 @@ void main() {
     });
 
     test('configure initialises the client', () async {
-      final mock = MockClient((_) async => successResponse());
-      ApiAlerts.configure('key', httpClient: mock);
+      ApiAlerts.configure('key');
+      ApiAlerts.setOverrides('dart', '1.0.0', 'http://localhost:$port/event');
       final result = await ApiAlerts.sendAsync(const Event(message: 'test'));
       expect(result.success, isTrue);
       expect(result.workspace, 'My Workspace');
     });
 
-    test('configure is idempotent — second call is a no-op', () async {
-      int callCount = 0;
-      final mock = MockClient((_) async {
-        callCount++;
-        return successResponse();
-      });
-      ApiAlerts.configure('first-key', httpClient: mock);
+    test('configure is idempotent, second call is a no-op', () async {
+      ApiAlerts.configure('first-key');
+      ApiAlerts.setOverrides('dart', '1.0.0', 'http://localhost:$port/event');
       ApiAlerts.configure('second-key'); // should be ignored
       await ApiAlerts.sendAsync(const Event(message: 'test'));
-      expect(callCount, 1); // only one HTTP call, not two
+      expect(lastRequest!.headers['authorization'], 'Bearer first-key');
     });
 
-    test('send is a no-op before configure', () async {
-      await expectLater(
-        ApiAlerts.send(const Event(message: 'test')),
-        completes,
+    test('send is a no-op before configure', () {
+      expect(
+        () => ApiAlerts.send(const Event(message: 'test')),
+        returnsNormally,
       );
     });
   });

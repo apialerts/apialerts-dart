@@ -1,34 +1,33 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'console.dart';
+import 'constants.dart' as constants;
 import 'event.dart';
 import 'result.dart';
 
-const _defaultBaseUrl = 'https://api.apialerts.com/event';
-const _defaultIntegration = 'dart';
-const _defaultVersion = '1.0.0';
-
-/// An instance-based API Alerts client.
-///
-/// Use the static methods on [ApiAlerts] for a convenient global singleton,
-/// or construct this class directly when you need multiple clients or want
-/// full control over configuration.
+/// An API Alerts client. Construct one directly for DI, multiple keys, or
+/// mocking; otherwise use the [ApiAlerts] singleton.
 class ApiAlertsClient {
+  /// The API key sent as the bearer token on every request.
   final String apiKey;
+
+  /// When true, successful sends and HTTP errors are logged. Critical errors
+  /// (missing key, empty message) always log regardless.
   final bool debug;
+
   final http.Client _httpClient;
 
-  String _integration = _defaultIntegration;
-  String _integrationVersion = _defaultVersion;
-  String _baseUrl = _defaultBaseUrl;
+  String _integration = constants.integrationName;
+  String _integrationVersion = constants.integrationVersion;
+  String _baseUrl = constants.apiUrl;
 
+  /// Creates a client bound to [apiKey]. Pass `debug: true` to log delivery.
   ApiAlertsClient(
     this.apiKey, {
     this.debug = false,
-    http.Client? httpClient,
-  }) : _httpClient = httpClient ?? http.Client();
+  }) : _httpClient = http.Client();
 
   /// Override the integration name, version, and base URL.
   ///
@@ -40,43 +39,45 @@ class ApiAlertsClient {
     _baseUrl = baseUrl;
   }
 
-  /// Send an event — fire-and-forget. Never throws.
+  /// Sends an event, fire-and-forget. Never throws.
   ///
-  /// Critical errors (not configured, missing key, empty message) are always
-  /// printed to stderr. HTTP errors and success are only printed when [debug]
-  /// is enabled.
-  Future<void> send(Event event) async {
-    if (apiKey.isEmpty) {
-      stderr.writeln('x (apialerts.com) Error: api key is missing');
+  /// Critical errors (missing key, empty message) are always printed to
+  /// stderr. HTTP errors and success are only printed when [debug] is enabled.
+  void send(Event event, {String? apiKey}) {
+    // ignore: unawaited_futures
+    _sendInternal(event, apiKey: apiKey);
+  }
+
+  Future<void> _sendInternal(Event event, {String? apiKey}) async {
+    final key = (apiKey != null && apiKey.isNotEmpty) ? apiKey : this.apiKey;
+    if (key.isEmpty) {
+      consoleError('x (apialerts.com) Error: api key is missing');
       return;
     }
     if (event.message.isEmpty) {
-      stderr.writeln('x (apialerts.com) Error: message is required');
+      consoleError('x (apialerts.com) Error: message is required');
       return;
     }
 
-    final result = await sendAsync(event);
+    final result = await sendAsync(event, apiKey: apiKey);
     if (!debug) return;
 
     if (!result.success) {
-      stderr.writeln('x (apialerts.com) Error: ${result.error}');
+      consoleError('x (apialerts.com) Error: ${result.error}');
     } else {
-      // ignore: avoid_print
-      print('✓ (apialerts.com) Alert sent to ${result.workspace} (${result.channel})');
+      consoleLog(
+          '✓ (apialerts.com) Alert sent to ${result.workspace} (${result.channel})');
       for (final w in result.warnings) {
-        // ignore: avoid_print
-        print('! (apialerts.com) Warning: $w');
+        consoleLog('! (apialerts.com) Warning: $w');
       }
     }
   }
 
-  /// Send an event and return the result. Never throws.
-  ///
-  /// Check [SendResult.success] to determine whether the event was delivered.
-  Future<SendResult> sendAsync(Event event) => _post(apiKey, event);
-
-  /// Send an event using an explicit API key, bypassing the configured one.
-  Future<SendResult> sendWithKey(String key, Event event) => _post(key, event);
+  /// Sends an event and returns the result. Never throws.
+  Future<SendResult> sendAsync(Event event, {String? apiKey}) {
+    final key = (apiKey != null && apiKey.isNotEmpty) ? apiKey : this.apiKey;
+    return _post(key, event);
+  }
 
   Future<SendResult> _post(String key, Event event) async {
     if (key.isEmpty) {
@@ -87,16 +88,18 @@ class ApiAlertsClient {
     }
 
     try {
-      final response = await _httpClient.post(
-        Uri.parse(_baseUrl),
-        headers: {
-          'Authorization': 'Bearer $key',
-          'Content-Type': 'application/json',
-          'X-Integration': _integration,
-          'X-Version': _integrationVersion,
-        },
-        body: jsonEncode(event.toJson()),
-      );
+      final response = await _httpClient
+          .post(
+            Uri.parse(_baseUrl),
+            headers: {
+              'Authorization': 'Bearer $key',
+              'Content-Type': 'application/json',
+              'X-Integration': _integration,
+              'X-Version': _integrationVersion,
+            },
+            body: jsonEncode(event.toJson()),
+          )
+          .timeout(const Duration(seconds: constants.timeoutSeconds));
 
       switch (response.statusCode) {
         case 200:
@@ -124,12 +127,11 @@ class ApiAlertsClient {
           return const SendResult(success: false, error: 'bad request');
         case 401:
           return const SendResult(
-              success: false, error: 'unauthorized — check your api key');
+              success: false, error: 'unauthorized, check your api key');
         case 403:
           return const SendResult(success: false, error: 'forbidden');
         case 429:
-          return const SendResult(
-              success: false, error: 'rate limit exceeded');
+          return const SendResult(success: false, error: 'rate limit exceeded');
         default:
           return SendResult(
               success: false,

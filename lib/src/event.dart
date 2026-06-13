@@ -1,32 +1,32 @@
-/// An event to send to the API Alerts platform.
-///
-/// Only [message] is required. All other fields are optional and omitted
-/// from the JSON payload if null — equivalent to Go's `omitempty`.
-///
-/// ```dart
-/// // Minimal
-/// final event = Event(message: 'Deploy complete');
-///
-/// // Full
-/// final event = Event(
-///   message: 'Deploy complete',
-///   channel: 'releases',
-///   event: 'ci.deploy',
-///   title: 'Deployed',
-///   tags: ['CI/CD', 'Dart'],
-///   link: 'https://github.com/apialerts/apialerts-dart/actions',
-///   data: {'version': '2.0.0'},
-/// );
-/// ```
+/// An event to send to API Alerts. Only [message] is required; null fields are
+/// omitted from the payload.
 class Event {
+  /// Human-readable notification text. Required. Appears on the push lock screen.
   final String message;
+
+  /// Workspace channel the push fires on. Defaults to the workspace default
+  /// when omitted.
   final String? channel;
+
+  /// What kind of thing happened. Optional but recommended. Use dotted notation
+  /// (`ci.deploy.success`, `payment.failed`) so routing rules can glob-match
+  /// (`ci.*`, `*.failed`).
   final String? event;
+
+  /// Short headline some destinations render separately from the body.
   final String? title;
+
+  /// Categorisation tags for filtering and search.
   final List<String>? tags;
+
+  /// URL attached to the notification. Tapping the push opens it.
   final String? link;
+
+  /// Arbitrary key-value metadata. Available to non-push destinations for
+  /// templating.
   final Map<String, dynamic>? data;
 
+  /// Creates an event. Only [message] is required.
   const Event({
     required this.message,
     this.channel,
@@ -37,6 +37,7 @@ class Event {
     this.data,
   });
 
+  /// The request payload, with null fields omitted.
   Map<String, dynamic> toJson() => {
         'message': message,
         if (channel != null) 'channel': channel,

@@ -21,7 +21,7 @@ import 'package:apialerts/apialerts.dart';
 
 void main() async {
   ApiAlerts.configure('your-api-key');
-  await ApiAlerts.send(const Event(message: 'Deploy complete'));
+  ApiAlerts.send(const Event(message: 'Deploy complete'));
 }
 ```
 
@@ -37,10 +37,10 @@ import 'package:apialerts/apialerts.dart';
 void main() async {
   ApiAlerts.configure('your-api-key');
 
-  // Fire-and-forget — never throws
-  await ApiAlerts.send(const Event(message: 'Deploy complete'));
+  // Fire-and-forget, never throws
+  ApiAlerts.send(const Event(message: 'Deploy complete'));
 
-  // Or get the result back — also never throws
+  // Or get the result back, also never throws
   final result = await ApiAlerts.sendAsync(const Event(message: 'Deploy complete'));
   if (result.success) {
     print('Sent to ${result.workspace} (${result.channel})');
@@ -64,7 +64,7 @@ Only `message` is required. All other fields are optional.
 | `event`   | `String?`               | No       | Event key for routing            |
 | `title`   | `String?`               | No       | Short title                      |
 | `tags`    | `List<String>?`         | No       | Categorisation tags              |
-| `link`    | `String?`               | No       | URL attached to the notification |
+| `link`    | `String?`               | No       | URL associated with the event (deeplink + CTA) |
 | `data`    | `Map<String, dynamic>?` | No       | Arbitrary key-value metadata     |
 
 ```dart
@@ -75,26 +75,56 @@ const event = Event(
   title: 'Deployed',
   tags: ['CI/CD', 'Dart'],
   link: 'https://github.com/apialerts/apialerts-dart/actions',
-  data: {'version': '2.0.0'},
+  data: {'version': '1.4.2', 'commit': 'a1b2c3d'},
 );
 ```
 
-### Instance-based client
+### Dependency injection
 
-Use `ApiAlertsClient` directly when you need multiple clients or want to
-manage the lifecycle yourself.
+The `ApiAlerts` singleton is the quickest way to send. When you want DI, mocking
+in tests, or multiple keys side by side, construct an `ApiAlertsClient` directly.
+`ApiAlerts` is a thin facade over a default `ApiAlertsClient`, so the two never
+drift.
 
 ```dart
 import 'package:apialerts/apialerts.dart';
 
-final client = ApiAlertsClient('your-api-key', debug: true);
-final result = await client.sendAsync(const Event(message: 'Deploy complete'));
-if (result.success) {
-  print('Sent to ${result.workspace} (${result.channel})');
-} else {
-  print('Error: ${result.error}');
-}
+final client = ApiAlertsClient('your-api-key');
+client.send(const Event(message: 'Deploy complete'));
 ```
+
+Register it with your service locator (for example `get_it`) and depend on the
+type. In tests, supply your own implementation of `ApiAlertsClient`.
+
+### Send to a different workspace
+
+Pass an optional `apiKey` to override the configured key for a single call.
+
+```dart
+ApiAlerts.send(event, apiKey: 'other-workspace-key');
+
+final result = await ApiAlerts.sendAsync(event, apiKey: 'other-workspace-key');
+```
+
+## Platform support
+
+Runs on Android, iOS, web, macOS, Windows, and Linux.
+
+- **Android:** add the INTERNET permission to `android/app/src/main/AndroidManifest.xml`. Flutter only adds it for debug builds, so release builds fail without it:
+
+  ```xml
+  <uses-permission android:name="android.permission.INTERNET"/>
+  ```
+
+- **macOS:** add the network client entitlement to `macos/Runner/DebugProfile.entitlements` and `Release.entitlements` so requests pass the app sandbox:
+
+  ```xml
+  <key>com.apple.security.network.client</key>
+  <true/>
+  ```
+
+- **Web:** works in the browser, but your API key ships in the app bundle and is visible to anyone who inspects it. Only use a key you are comfortable exposing client-side.
+- **iOS, Windows, Linux:** no extra configuration. The endpoint is HTTPS, so iOS App Transport Security is satisfied by default.
 
 ## Links
 
