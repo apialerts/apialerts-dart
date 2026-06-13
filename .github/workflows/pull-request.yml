@@ -1,0 +1,26 @@
+name: Pull Request
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dart-lang/setup-dart@v1
+      - name: Install dependencies
+        run: dart pub get
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+      - name: Analyze
+        run: dart analyze --fatal-infos
+      - name: Test
+        run: dart test
+      - name: Notify
+        run: dart example/run.dart --build
+        env:
+          APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
