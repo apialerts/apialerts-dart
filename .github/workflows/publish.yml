@@ -1,13 +1,20 @@
 name: Publish to pub.dev
 
+# pub.dev OIDC only trusts tokens from a tag push or workflow_dispatch,
+# never a release event. Tag pattern matches pub.dev's default `v{{version}}`.
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 jobs:
-  build:
-    name: Build and Test
+  publish:
+    name: Publish
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write # required for pub.dev OIDC
     steps:
       - uses: actions/checkout@v6
       - uses: dart-lang/setup-dart@v1
@@ -19,44 +26,9 @@ jobs:
         run: dart analyze --fatal-infos
       - name: Test
         run: dart test
-      - run: dart example/run.dart --release
-        env:
-          APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
-
-  publish-alpha:
-    name: Publish Alpha
-    needs: build
-    if: github.event.release.prerelease == true
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dart-lang/setup-dart@v1
-      - name: Install dependencies
-        run: dart pub get
       - name: Publish
         run: dart pub publish --force
-      - run: dart example/run.dart --publish
-        env:
-          APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
-
-  publish-release:
-    name: Publish Release
-    needs: build
-    if: github.event.release.prerelease == false
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dart-lang/setup-dart@v1
-      - name: Install dependencies
-        run: dart pub get
-      - name: Publish
-        run: dart pub publish --force
-      - run: dart example/run.dart --publish
+      - name: Notify
+        run: dart example/run.dart --publish
         env:
           APIALERTS_API_KEY: ${{ secrets.APIALERTS_API_KEY }}
